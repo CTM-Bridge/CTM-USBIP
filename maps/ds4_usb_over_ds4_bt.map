@@ -1,0 +1,252 @@
+# CMU single-map runtime for virtual DS4 USB HID over physical DS4 Bluetooth.
+# DS4 USB Audio/HID over physical DS4 Bluetooth.
+
+[map]
+id = ds4_usb_over_ds4_bt
+version = 1
+virtual_device = ds4_usb
+physical_device = ds4_bt
+
+[usb.endpoints]
+hid_in = 0x84
+hid_out = 0x03
+iso_out = 0x01
+iso_in = 0x82
+
+[path.input.controller_to_virtual]
+trigger = physical.read
+source_report = 0x11
+destination_endpoint = 0x84
+destination_report = 0x01
+destination_length = 64
+# DS4 BT input 0x11 has two transport/header bytes before the USB state.
+op.1 = bytes.copy source[3..65] -> destination[1..63]
+
+[path.output.virtual_to_controller]
+trigger = usb.endpoint.hid_out
+source_endpoint = 0x03
+source_report = 0x05
+destination_report = 0x11
+destination_length = 78
+# DS4 BT output header. Keep this in the map instead of app code.
+op.1 = bytes.set dst=1 value=0xc0
+op.2 = bytes.set dst=2 value=0x00
+op.3 = bytes.copy source[1..31] -> destination[3..33]
+tail = crc32.hid_output seed=0xa2 destination[74..77]
+
+[path.control.feature_get]
+trigger = usb.ep0.GET_REPORT
+cache_on_connect = false
+if_cached = respond_from_cache
+if_missing = stall
+
+[path.control.feature_set]
+trigger = usb.ep0.SET_REPORT
+cache_written_reports = true
+if_unknown = log_and_ack
+
+[path.control.feature_pages]
+selector_report = 0xa0
+# DriftGuard/WebHID writes DS4 feature 0xa0 selectors, then reads feature 0xa4.
+page.1.selector = 0x02 0x01
+page.1.response_report = 0xa4
+page.1.response_length = 14
+page.1.response_prefix = 0xa4 0x02 0x01 0x00 0x00 0x00 0xb3 0x08 0x00 0x00 0x00 0x00 0x00 0x00
+page.1.static = true
+page.2.selector = 0x0b 0x02
+page.2.response_report = 0xa4
+page.2.response_length = 14
+page.2.response_prefix = 0xa4 0x0b 0x02 0x01 0x00 0x06 0x90 0x04 0x9a 0x00 0x00 0x00 0x00 0x00
+page.2.static = true
+page.3.selector = 0x0e 0x03
+page.3.response_report = 0xa4
+page.3.response_length = 14
+page.3.response_prefix = 0xa4 0x0e 0x03 0x00 0x00 0x04 0xb3 0x08 0x0a 0x08 0x00 0x00 0x00 0x00
+page.3.static = true
+
+[path.control.usb_control_map]
+rule.1.match = usb.feature_get report=0x02
+rule.1.response = usb.respond length=37 prefix=0x02 static=true
+rule.1.cache = true
+rule.2.match = usb.feature_get report=0x12
+rule.2.response = usb.respond length=16 prefix=0x12 static=true
+rule.2.cache = true
+rule.3.match = usb.feature_get report=0xa3
+rule.3.response = usb.respond length=49 static=true
+rule.3.response_prefix = 0xa3 0x53 0x65 0x70 0x20 0x31 0x37 0x20 0x32 0x30 0x32 0x31 0x00 0x00 0x00 0x00 0x00 0x30 0x35 0x3a 0x31 0x37 0x3a 0x31 0x35 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0xb0 0x01 0x00 0x00 0x00 0x0b 0xa0 0x00 0x00 0x00 0x00 0x00 0x00
+rule.3.cache = true
+rule.4.match = usb.feature_get report=0x11
+rule.4.response = usb.respond length=2 prefix=0x11 0x01 static=true
+rule.4.cache = true
+rule.5.match = usb.feature_set report=0x08
+
+[path.control.uac1_feature_units]
+audio_control_interface = 0
+speaker_unit = 2
+headset_unit = 5
+mute_control = 1
+volume_control = 2
+speaker.mute.default = 0
+speaker.volume.default = -25600
+speaker.volume.min = -25600
+speaker.volume.max = 0
+speaker.volume.res = 256
+headset.mute.default = 0
+headset.volume.default = -25600
+headset.volume.min = -25600
+headset.volume.max = 0
+headset.volume.res = 256
+
+[path.control.uac1_endpoint_sample_freq]
+sample_freq_control = 1
+endpoint.0x01.default = 32000
+endpoint.0x01.min = 32000
+endpoint.0x01.max = 32000
+endpoint.0x01.res = 0
+endpoint.0x82.default = 16000
+endpoint.0x82.min = 16000
+endpoint.0x82.max = 16000
+endpoint.0x82.res = 0
+
+[path.iso.virtual_to_physical_stream]
+trigger = usb.endpoint.iso_out
+source_endpoint = 0x01
+# USB ISO endpoint declares 32 kHz stereo to Windows. The ingest stage
+# resamples into the reservoir at reservoir_sample_rate; both are 32 kHz
+# here so it is a pass-through but the plumbing matches DS5 for any future
+# rate-matching probes.
+sample_rate = 32000
+reservoir_sample_rate = 32000
+channels = 2
+# Frame size the builder pulls from the reservoir for each BT 0x15 packet.
+# 2 SBC frames at blocks=16 subbands=8 = 256 PCM frames per channel = 8 ms
+# of audio at 32 kHz.
+frame_samples = 256
+# expected_urb_bytes is bookkeeping only -- the ingest path is size-agnostic.
+# Windows submits 1280-byte URBs on the wired reference (10 ms aggregation);
+# the reservoir absorbs the rate mismatch via the velocity feedback below.
+expected_urb_bytes = 1024
+# DS4 BT audio report ID/length candidates. Report ID low nibble tracks
+# packet size: length = 14 + 64 * low_nibble. Keep these two active values
+# paired with op.4 below.
+# physical_report_id = 0x14
+# physical_report_length = 270
+ physical_report_id = 0x15
+ physical_report_length = 334
+# physical_report_id = 0x16
+# physical_report_length = 398
+# physical_report_id = 0x17
+# physical_report_length = 462
+# physical_report_id = 0x18
+# physical_report_length = 526
+sbc_sample_rate = 32000
+sbc_frame_samples = 256
+sbc_payload_bytes = 224
+sbc_bitpool = 25
+sbc_blocks = 16
+sbc_subbands = 8
+# sbc_channel_mode is the original probed value. 'dual' (=dual_channel) gave
+# us audio flowing as speaker mono + headset L only + headset R silent.
+# 'stereo' produced the same symptom in subsequent tests. Keeping 'dual' as
+# the known-good baseline; cycle through report ids first before re-probing
+# the channel mode.
+sbc_channel_mode = dual
+sbc_allocation = loudness
+
+# iso_out_completion_delay_us = how long we hold each ISO OUT URB before
+# completing it. The USBIP server currently derives ISO OUT completion from
+# the submitted byte count, so 1280-byte DS4 speaker URBs complete at 10 ms.
+iso_out_completion_delay_us = 0
+iso_out_completion_delay_scale = 0.9995
+
+# === Intermediate reservoir ===
+# warmup_ms: minimum fill before the builder is allowed to start pulling.
+# Set above 2x bt_pace_ms so the first cold pull has comfortable headroom.
+# max_ms: hard cap; on overflow ingest drops *oldest* samples (we never
+# reject incoming Windows data, we just make room for it).
+intermediate_buffer_warmup_ms = 64
+intermediate_buffer_max_ms = 300
+
+# === Adaptive pace feedback (velocity-based, rate-matching) ===
+# Mirrors the DS5 control law. The writer adjusts bt_pace_ms within
+# [pace_min_ms, pace_max_ms] every pace_adjust_interval_frames frames to
+# keep the reservoir near-empty.
+#
+# Inside the safe band [hard_min, hard_max] we react to *velocity*, not
+# position: dfill > deadband -> reservoir growing -> writer too slow ->
+# shrink pace; dfill < -deadband -> reservoir shrinking -> writer too
+# fast -> grow pace.
+pace_adjust_step_ms = 0.01
+pace_adjust_interval_frames = 1
+bt_pace_ms = 8.0
+audio_builder_pace_ms = 0.0
+pace_min_ms = 8.0
+pace_max_ms = 8.0
+pace_hard_min_fill_ms = 8
+pace_hard_max_fill_ms = 80
+pace_hard_step_multiplier = 5
+pace_velocity_deadband_ms = 1
+
+buffers = physical_report, speaker_pcm, sbc_payload, output_effects_payload
+# Natural channel order. The channels=1,0 swap diagnostic gave no audible
+# content change; we either need a more obvious test source (Windows test
+# L/R speech) or our pipeline is collapsing channels somewhere -- but
+# either way, swap is not the fix. Reverted to channels=0,1.
+
+op.1 = pcm.select_channels usb_iso_pcm channels=0,1 out=speaker_pcm
+
+# 2 SBC frames @ blocks=16 subbands=8 = 2 * 128 PCM frames/channel = 256
+# PCM frames per channel total, encoded into 2 * 112 = 224 SBC bytes.
+
+op.2 = codec.sbc_encode speaker_pcm sample_rate=32000 channels=2 frame_samples=256 bytes=224 bitpool=25 blocks=16 subbands=8 channel_mode=dual allocation=loudness out=sbc_payload
+
+op.3 = physical_report.clear
+# Match op.4 to the active physical_report_id above.
+# op.4 = bytes.set physical_report offset=0 value=0x14
+op.4 = bytes.set physical_report offset=0 value=0x15
+# op.4 = bytes.set physical_report offset=0 value=0x16
+# op.4 = bytes.set physical_report offset=0 value=0x17
+# op.4 = bytes.set physical_report offset=0 value=0x18
+# Byte 1 = 0xC8: confirmed working header byte. DO NOT change.
+op.5 = bytes.set physical_report offset=1 value=0xC8
+# Byte 2 = 0xA8: low nibble (0x8) is the audio latency / clicking control.
+# DO NOT change without a clicking regression test.
+op.6 = bytes.set physical_report offset=2 value=0xA8
+op.7 = bytes.copy output_effects_payload src=0..30 target=physical_report dst=3
+# 2 SBC frames per packet -> frame counter advances by 2.
+op.8 = word.set_le physical_report offset=78 source=audio_frame_counter step=2
+
+# Audio target byte: 0x00 off (default), 0x02 speaker, 0x24 headset,
+# 0x26 speaker+headset probe. Win side stays blind/off; TV-side bridge
+# is the route-authority overlay. Game USB writes still propagate via
+# op.7 (USB[1..31] -> BT[3..33]).
+op.9 = bytes.set physical_report offset=80 value=0x00
+
+op.10 = bytes.copy sbc_payload src=0..223 target=physical_report dst=81
+op.11 = crc32.hid_output seed=0xa2 target=physical_report tail=last4
+emit = physical.write physical_report
+
+# === CTM Bridge advertise manifest ===
+# DS4 capabilities for the Moonlight overlay. Note: audio route options
+# are still being figured out (off / both byte values unconfirmed per
+# tracker in cmu_audio_routing_known_issues.md). Volume range matches
+# Game Controller Collective wiki firmware ceiling of 0x4F.
+[advertise]
+controller_name = DualShock 4
+vendor = Sony
+rumble = true
+leds = true
+adaptive_triggers = false
+haptics = false
+audio_output = true
+audio_input = false
+audio_redirect = true
+volume_control_speaker = true
+volume_control_headphone = true
+# headphones is the only fully-clean stereo mode confirmed today; speaker
+# leaks to headphone-R; off and both behave oddly (open issue).
+audio_route_modes = off, headphones, speaker, both
+latency_adjustable_ms = 0
+battery = true
+stop_sniff_rate = false
+overlay_settings = audio_redirect, volume_speaker, volume_headphone

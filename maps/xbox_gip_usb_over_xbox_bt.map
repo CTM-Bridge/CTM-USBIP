@@ -1,0 +1,136 @@
+# Experimental Xbox Bluetooth HID/GATT input -> real Xbox USB/GIP map.
+# The virtual side is the captured 045E:0B12 GIP device, not XUSB/XInput.
+# First pass covers the GIP input packet and simple captured status replies;
+# audio metadata still needs real protocol work.
+
+[map]
+id = xbox_gip_usb_over_xbox_bt
+version = 1
+virtual_device = xbox_gip_usb
+physical_device = xbox_bt_hidraw
+
+[usb.endpoints]
+hid_in  = 0x82
+hid_out = 0x02
+iso_out = 0x03
+iso_in  = 0x83
+
+[path.input.controller_to_virtual]
+trigger = physical.read
+# The TV hidraw stream delivers the raw 17-byte Xbox BT input report:
+# report ID 0x01 at byte 0, then the 16-byte payload (LX/LY/RX/RY u16,
+# LT/RT u16, hat, buttons). Filter to report 0x01 and skip the ID byte so
+# the ops below address the payload at offset 0 (LX low byte). (Windows HID
+# in bt-mode strips the report ID and yields 16 bytes, but that path is a
+# dead rig for Xbox; the hidraw bridge is the real source.)
+source_report = 0x01
+source_offset = 1
+destination_endpoint = 0x82
+destination_report = 0x20
+destination_length = 48
+op.1 = bytes.set dst=0 value=0x20
+op.2 = bytes.set dst=1 value=0x00
+op.3 = counter.u8 dst=2
+op.4 = bytes.set dst=3 value=0x2C
+op.5 = hat8.to_dpad_bits dst=5 src=12
+# Buttons: payload byte 13 (=src 13 after offset) and byte 14 (=src 14) of the
+# Xbox BT HID report. The BT button byte has GAP bits: A=0x01 B=0x02 X=0x08
+# Y=0x10 LB=0x40 RB=0x80 (bits 2 and 5 unused); View/Menu/L3/R3 live in the next
+# byte at 0x04/0x08/0x20/0x40. (Source: SDL HIDAPI Xbox driver.) Destination is
+# the GIP 0x20 byte 4/5 bit layout (source: Linux xpad.c).
+op.6  = bits.merge dst=4 src=13 src_mask=0x01 src_shift=0 dst_mask=0x10 dst_shift=4
+op.7  = bits.merge dst=4 src=13 src_mask=0x02 src_shift=1 dst_mask=0x20 dst_shift=5
+op.8  = bits.merge dst=4 src=13 src_mask=0x08 src_shift=3 dst_mask=0x40 dst_shift=6
+op.9  = bits.merge dst=4 src=13 src_mask=0x10 src_shift=4 dst_mask=0x80 dst_shift=7
+op.10 = bits.merge dst=5 src=13 src_mask=0x40 src_shift=6 dst_mask=0x10 dst_shift=4
+op.11 = bits.merge dst=5 src=13 src_mask=0x80 src_shift=7 dst_mask=0x20 dst_shift=5
+op.12 = bits.merge dst=4 src=14 src_mask=0x04 src_shift=2 dst_mask=0x08 dst_shift=3
+op.13 = bits.merge dst=4 src=14 src_mask=0x08 src_shift=3 dst_mask=0x04 dst_shift=2
+op.14 = bits.merge dst=5 src=14 src_mask=0x20 src_shift=5 dst_mask=0x40 dst_shift=6
+op.15 = bits.merge dst=5 src=14 src_mask=0x40 src_shift=6 dst_mask=0x80 dst_shift=7
+# Triggers: BT LT/RT u16 (payload bytes 8..11) copied straight to GIP LT/RT.
+op.16 = bytes.copy source[8..11] -> destination[6..9]
+# Sticks: X recentres (u16-0x8000); Y inverts (0x7FFF-u16) because BT HID is
+# Y-down (up=0x0000) but GIP/XInput is Y-up=positive.
+op.17 = u16le.add  dst=10 src=0 value=-32768
+op.18 = u16le.rsub dst=12 src=2 value=32767
+op.19 = u16le.add  dst=14 src=4 value=-32768
+op.20 = u16le.rsub dst=16 src=6 value=32767
+
+[path.output.virtual_to_controller]
+trigger = usb.endpoint.hid_out
+source_endpoint = 0x02
+source_report = 0x09
+# Xbox BT HID rumble report: report ID 0x03 at destination[0], then the
+# 8-byte payload (enable-mask, LT, RT, left, right, duration, start-delay,
+# loop). The captured ATT write was only the 8 payload bytes with no report
+# ID because GATT carries the report ID out-of-band; the Windows HID and
+# Linux hidraw write APIs both need the ID as byte 0. The copy targets
+# destination[1] so it does not clobber the report ID (same convention as
+# the DS4/DS5 maps).
+destination_report = 0x03
+destination_length = 9
+op.1 = bytes.copy source[5..12] -> destination[1..8]
+tail = none
+
+[path.control.feature_get]
+trigger = usb.ep0.GET_REPORT
+cache_on_connect = false
+if_cached = respond_from_cache
+if_missing = stall
+
+[path.control.feature_set]
+trigger = usb.ep0.SET_REPORT
+cache_written_reports = false
+if_unknown = log_and_ack
+
+[path.virtual.input_packets]
+# GIP USB init handshake, captured from a real 045E:0B12 controller (see
+# docs/xbox_gip_handshake.md). Windows xboxgip needs the announce + capability
+# descriptor before it promotes the device to an XInput gamepad (what
+# Gamepadla / hardwaretester / most games read). Bytes are replayed verbatim.
+
+# On SET_CONFIGURATION: announce (VID 045E / PID 0B12) so the host requests our
+# descriptor, then the device status packet.
+rule.1.match = usb.control setup_prefix=00:09
+rule.1.destination_endpoint = 0x82
+rule.1.packet.1 = 02 20 02 1c 7e ed 89 ba f0 45 00 00 5e 04 12 0b 05 00 17 00 06 00 00 00 08 04 01 00 01 00 01 00
+rule.1.packet.2 = 03 20 13 04 83 01 00 00
+
+# Host descriptor request (04 20 ..) -> chunked capability descriptor that
+# declares the "Windows.Xbox.Input.Gamepad" class + interface GUID.
+rule.2.match = usb.endpoint_out endpoint=0x02 prefix=0x04:0x20
+rule.2.destination_endpoint = 0x82
+rule.2.packet.1 = 04 f0 03 3a a3 02 10 00 01 00 00 00 00 00 00 00 00 00 00 00 23 01 cd 00 16 00 1b 00 1c 00 26 00 2f 00 4c 00 00 00 00 00 00 00 00 00 01 05 00 17 00 00 09 01 02 03 04 06 07 0c 0d 1e 08 01 04 05
+rule.2.packet.2 = 04 a0 03 ba 00 3a 06 0a 0c 0d 1e 01 1a 00 57 69 6e 64 6f 77 73 2e 58 62 6f 78 2e 49 6e 70 75 74 2e 47 61 6d 65 70 61 64 08 56 ff 76 97 fd 9b 81 45 ad 45 b6 45 bb a5 26 d6 2c 40 2e 08 df 07 e1
+rule.2.packet.3 = 04 a0 03 ba 00 74 45 a5 ab a3 12 7a f1 97 b5 e7 1f f3 b8 86 73 e9 40 a9 f8 2f 21 26 3a cf b7 fe d2 dd ec 87 d3 94 42 bd 96 1a 71 2e 3d c7 7d 6b e5 f2 87 bb c3 b1 49 82 65 ff ff f3 77 99 ee 1e
+rule.2.packet.4 = 04 a0 03 3a ae 01 9b ad 34 ad 36 b5 4f 8a c7 17 23 4c 9f 54 6f 77 ce 34 7a e2 7d c6 45 8c a4 00 42 c0 8b d9 4a c0 c8 96 ea 16 b2 8b 44 be 80 7e 5d eb 06 98 e2 03 17 00 20 2c 00 01 00 10 00 00
+rule.2.packet.5 = 04 a0 03 3a e8 01 00 00 00 00 00 00 00 00 00 00 00 00 00 17 00 09 3c 00 01 00 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 17 00 1e 40 00 01 00 22 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+rule.2.packet.6 = 04 b0 03 01 a2 02 00
+rule.2.packet.7 = 04 a0 03 00 a3 02
+
+# Host latency probe (0d 20 ..) -> echo (token is canned; probe is post-bind).
+rule.3.match = usb.endpoint_out endpoint=0x02 prefix=0x0D:0x20
+rule.3.destination_endpoint = 0x82
+rule.3.packet.1 = 0D 20 14 0D 00 92 65 B6 0D 43 7B DB 00 62 7B DB 00
+
+[advertise]
+controller_name = Xbox Wireless Controller
+vendor = Microsoft
+rumble = false
+leds = false
+adaptive_triggers = false
+haptics = false
+audio_output = false
+audio_input = false
+audio_redirect = false
+volume_control_speaker = false
+volume_control_headphone = false
+audio_route_modes =
+latency_adjustable_ms = 0
+battery = false
+stop_sniff_rate = false
+overlay_settings =
+
+[debug]
+log_mapped_input = true
