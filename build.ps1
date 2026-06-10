@@ -3,7 +3,8 @@ param(
     [ValidateSet('x64')]
     [string]$Platform = 'x64',
     [ValidateSet('Debug', 'Release')]
-    [string]$Configuration = 'Debug'
+    [string]$Configuration = 'Debug',
+    [switch]$WithUsbDisplay
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,3 +70,10 @@ Copy-Item -Force -Path (Join-Path $Root 'maps\xbox_gip_usb_over_xbox_bt.map') -D
 Copy-Item -Force -Path (Join-Path $Root 'third_party\ffmpeg\x64\release\bin\*.dll') -Destination $out
 
 Write-Host "Built: $(Join-Path $out 'ctm-usbip.exe')"
+
+if ($WithUsbDisplay) {
+    $displayProject = Join-Path $Root 'app\ctm-usbdisplay.vcxproj'
+    & $msbuild $displayProject /m /p:Configuration=$Configuration /p:Platform=$Platform
+    if ($LASTEXITCODE -ne 0) { throw 'ctm-usbdisplay build failed.' }
+    Write-Host "Built: $(Join-Path $out 'ctm-usbdisplay.exe')"
+}
