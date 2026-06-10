@@ -1,8 +1,7 @@
 # Steam Controller Puck (28de:1304) — composite bridge knowledge
 
-Self-contained record of the puck-over-CTM-bridge work. Any agent (Claude,
-ctm-keeper, ChatGPT, human) should be able to pick this up cold. Last updated
-2026-06-04.
+Self-contained record of the puck-over-CTM-bridge work. Anyone (human or tool)
+should be able to pick this up cold. Last updated 2026-06-04.
 
 **CLEAN-ROOM (hard rule):** never use `hid-steam.c` or any external / kernel /
 third-party source for puck protocol. This puck is ~1 month old and predates such

@@ -176,7 +176,7 @@ Minimal:
 
 ## 12. Open architecture questions
 
-Tracked in `~/.claude/projects/D--Work-CMU/memory/ctm_bridge_architecture_questions.md`. To resolve before/during implementation:
+To resolve before/during implementation:
 - Strip or keep `SS_CMU_HID_*` packets in moonlight-common-c.
 - Process ownership / child-spawn vs external service.
 - TV ↔ host transport: independent TCP vs piggyback on Moonlight stream.
