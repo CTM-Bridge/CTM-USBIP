@@ -4,10 +4,12 @@
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <winsvc.h>
 
 #include "ctm/hid.h"
 #include "ctm/map/runtime.h"
 #include "ctm/profile.h"
+#include "ctm/version.h"
 
 #include <hidsdi.h>
 
@@ -22,6 +24,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <fstream>
 #include <functional>
 #include <iomanip>
 #include <iostream>
@@ -51,6 +54,7 @@ namespace {
 #include "usbip/server.inl"
 #include "app/cli.inl"
 #include "app/agent.inl"
+#include "app/service.inl"
 
 } // namespace
 
@@ -68,6 +72,10 @@ int wmain(int argc, wchar_t **argv)
     }
 
     std::wstring mode = argv[1];
+    if (mode == L"version" || mode == L"--version" || mode == L"-v") {
+        std::wcout << L"ctm-usbip " << widen_ascii(CTM_VERSION_DISPLAY, strlen(CTM_VERSION_DISPLAY)) << L"\n";
+        return 0;
+    }
     bool noAttach = false;
     std::wstring profileOverride;
     std::wstring mapOverride;
@@ -102,6 +110,54 @@ int wmain(int argc, wchar_t **argv)
             }
         }
         return run_agent(static_cast<uint16_t>(port));
+    }
+
+    if (mode == L"service-run") {
+        unsigned long port = kAgentDefaultPort;
+        int argIndex = 2;
+        if (argc >= 3 && argv[2][0] != L'-') {
+            if (!parse_uint_arg(argv[2], 65535, &port) || port < 1024) {
+                print_usage();
+                return 2;
+            }
+            argIndex = 3;
+        }
+        for (int i = argIndex; i < argc; ++i) {
+            if (std::wstring(argv[i]) == L"--enet") {
+                g_use_enet.store(true);
+            } else {
+                print_usage();
+                return 2;
+            }
+        }
+        g_service_port = static_cast<uint16_t>(port);
+        g_running_as_service.store(true);
+        return run_service();
+    }
+
+    if (mode == L"install" || mode == L"uninstall") {
+        if (mode == L"uninstall") {
+            return service_uninstall();
+        }
+        unsigned long port = kAgentDefaultPort;
+        bool useEnet = false;
+        int argIndex = 2;
+        if (argc >= 3 && argv[2][0] != L'-') {
+            if (!parse_uint_arg(argv[2], 65535, &port) || port < 1024) {
+                print_usage();
+                return 2;
+            }
+            argIndex = 3;
+        }
+        for (int i = argIndex; i < argc; ++i) {
+            if (std::wstring(argv[i]) == L"--enet") {
+                useEnet = true;
+            } else {
+                print_usage();
+                return 2;
+            }
+        }
+        return service_install(static_cast<uint16_t>(port), useEnet);
     }
 
     if (mode == L"bt") {

@@ -50,7 +50,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>..\third_party\vcpkg\installed\x64-windows-static\debug\lib;..\third_party\ffmpeg\x64\release\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>setupapi.lib;hid.lib;cfgmgr32.lib;opus.lib;avcodec.lib;avutil.lib;ws2_32.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>setupapi.lib;hid.lib;cfgmgr32.lib;advapi32.lib;opus.lib;avcodec.lib;avutil.lib;ws2_32.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
     </Link>
   </ItemDefinitionGroup>
@@ -64,10 +64,13 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>..\third_party\vcpkg\installed\x64-windows-static\lib;..\third_party\ffmpeg\x64\release\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>setupapi.lib;hid.lib;cfgmgr32.lib;opus.lib;avcodec.lib;avutil.lib;ws2_32.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>setupapi.lib;hid.lib;cfgmgr32.lib;advapi32.lib;opus.lib;avcodec.lib;avutil.lib;ws2_32.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
     </Link>
   </ItemDefinitionGroup>
+  <ItemGroup>
+    <ResourceCompile Include="ctm-usbip.rc" />
+  </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\main.cpp" />
     <ClCompile Include="..\src\hid\enumerate.cpp" />

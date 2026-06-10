@@ -21,6 +21,19 @@ constexpr const wchar_t *kDefaultBusId = L"ctm-ds5";
 
 std::atomic_bool g_stop(false);
 
+// Set when this process was launched as a Windows service (service-run), and
+// when a hard restart has been requested over the control channel. Read by the
+// service wrapper (app/service.inl) to decide whether to report a failure exit
+// so the SCM restart recovery action fires.
+std::atomic_bool g_running_as_service(false);
+std::atomic_bool g_restart_requested(false);
+
+// Defined in app/service.inl. Requests a full SCM-driven restart of this
+// process when running as a service; returns false in interactive agent mode,
+// where a hard restart is a no-op. Forward declared here so agent.inl's control
+// handler can call it before service.inl is included.
+static bool request_service_restart();
+
 // Runtime selection of the additive ENet/UDP transport. Off by default so the
 // process behaves byte-identically to the TCP-only build; set true only when
 // the --enet flag is passed. Read by the agent session worker and bridge mode

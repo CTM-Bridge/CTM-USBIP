@@ -391,11 +391,35 @@ static void handle_agent_client(SOCKET client, const sockaddr_in &peer)
         return;
     }
 
+    if (command == "RESTART") {
+        std::string arg;
+        input >> arg;
+        if (arg == "hard") {
+            // Full restart of the process via the SCM (service mode only). The
+            // session/USB-IP state is rebuilt from scratch when the TV
+            // re-issues BRIDGE_START after the service comes back.
+            if (request_service_restart()) {
+                send_text(client, "OK service restarting\n");
+            } else {
+                send_text(client, "ERR hard restart requires service mode\n");
+            }
+            return;
+        }
+        // Soft reset: tear down every bridge session and its USB/IP export
+        // (Windows sees each virtual device unplug); the agent keeps listening
+        // and rebuilds on the next BRIDGE_START.
+        stop_all_bridge_sessions();
+        send_text(client, "OK bridges reset\n");
+        return;
+    }
+
     send_text(client, "ERR unknown command\n");
 }
 
 static int run_agent(uint16_t port)
 {
+    std::wcout << L"ctm-usbip " << widen_ascii(CTM_VERSION_DISPLAY, strlen(CTM_VERSION_DISPLAY))
+               << L" agent starting\n";
     WSADATA data = {};
     if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
         std::wcerr << wsa_error_message(L"WSAStartup failed") << L"\n";

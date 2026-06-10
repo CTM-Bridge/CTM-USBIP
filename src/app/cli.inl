@@ -67,5 +67,9 @@ static void print_usage()
         << L"  ctm-usbip bt <index> [--no-attach] [--profile <file>] [--map <file>] [--busid <id>] [--audio-latency <byte>] [--audio-block <byte>]\n"
         << L"  ctm-usbip bridge <listen-port> [--enet] [--no-attach] [--profile auto|<file>] [--map <file>] [--busid <id>] [--audio-latency <byte>] [--audio-block <byte>]\n"
         << L"  ctm-usbip agent [control-port] [--enet]\n"
+        << L"  ctm-usbip install [control-port] [--enet]    (register + start the Windows service)\n"
+        << L"  ctm-usbip uninstall                          (stop + remove the Windows service)\n"
+        << L"  ctm-usbip service-run [control-port] [--enet] (internal: launched by the SCM)\n"
+        << L"  ctm-usbip version\n"
         << L"  (--enet selects the additive ENet/UDP transport on the same port; without it the TCP transport is used.)\n";
 }

@@ -10,6 +10,8 @@
 
 The original use case: you stream a PC game to an LG TV (Moonlight/Sunshine) and your controller is connected to the **TV**, not the PC. CTM-USBIP makes that controller appear on the PC.
 
+> **Quick install:** download `CTM-Bridge-Setup.exe` from the [latest release](https://github.com/CTM-Bridge/CTM-USBIP/releases) — it installs the background service, the LAN firewall rule, and the usbip-win2 driver in one step (see [§4](#4-install-as-a-windows-service-recommended)).
+
 ---
 
 ## 1. What it does
@@ -50,6 +52,8 @@ CTM-USBIP needs the [usbip-win2] USB/IP client and its **WHQL-signed virtual hos
 
 **Step 1 — install the usbip-win2 driver**
 
+> Using the installer (§4)? **Skip this** — it bundles and installs usbip-win2 for you. This manual step is only for the build-and-run-the-agent (dev) workflow.
+
 Download and install a usbip-win2 release that includes the WHQL/WHLK-certified driver:
 
 ➡ **https://github.com/vadimgrn/usbip-win2** — releases: **https://github.com/vadimgrn/usbip-win2/releases**
@@ -78,6 +82,36 @@ Start the **ctm-bridge-webos** app on the TV, point it at your PC's IP and the a
 
 ---
 
+## 4. Install as a Windows service (recommended)
+
+For day-to-day use, install CTM-USBIP as an auto-start service instead of running the agent by hand.
+
+**Run the installer** — `out\installer\CTM-Bridge-Setup.exe`. It copies the agent to `C:\Program Files\CTM Bridge`, registers an auto-start **LocalSystem** service, opens a LAN (private-profile) firewall rule for it, starts it, and (on upgrade) removes the previous version first while leaving any custom `.map` / `.profile` files in place. It also **bundles and silently installs the usbip-win2 driver** (BSD-2-Clause, signed installer shipped unmodified) when it isn't already present. Service logs go to `%ProgramData%\CTM Bridge\ctm-usbip.log`.
+
+The service runs the same `agent` loop, so the TV connects to it exactly as before.
+
+Equivalent CLI, if you prefer no installer (run from an elevated prompt):
+
+```powershell
+ctm-usbip install [control-port]     # register + start the service (default port 48054)
+ctm-usbip uninstall                  # stop + remove the service and its firewall rule
+ctm-usbip version                    # print the version
+```
+
+The agent can be reset over the control channel without touching Windows: send `RESTART` to rebuild the bridges in place, or `RESTART hard` for a full service restart.
+
+### Building the installer
+
+```powershell
+.\build.ps1 -Configuration Release
+.\installer\make-icon.ps1            # only if the brand art changed
+& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" installer\ctm-usbip.iss
+```
+
+Output: `out\installer\CTM-Bridge-Setup.exe`.
+
+---
+
 ## Project layout
 
 | Path | What |
@@ -85,9 +119,11 @@ Start the **ctm-bridge-webos** app on the TV, point it at your PC's IP and the a
 | `src/usbip/` | USB/IP server + virtual USB device |
 | `src/backend/` | transports (TCP bridge, ENet/UDP, local Bluetooth) |
 | `src/map/` | map runtime (report translation) |
+| `src/app/` | CLI, agent, and Windows-service entry points |
 | `profiles/descriptors/` | per-controller USB descriptor profiles |
 | `maps/` | per-controller translation maps |
-| `include/`, `app/` | headers and the MSBuild project |
+| `include/`, `app/` | headers, the MSBuild project, app icon + version resource |
+| `installer/` | Inno Setup script (`ctm-usbip.iss`) + icon generator |
 | `docs/` | design notes + worklog |
 
 ## Status
@@ -104,6 +140,6 @@ All controller protocol in this project is derived from its own observation (sys
 
 ## Acknowledgements
 
-- [usbip-win2] by **vadimgrn** — the USB/IP client for Windows and its signed virtual host-controller driver, which CTM-USBIP builds on.
+- [usbip-win2] by **vadimgrn** — the USB/IP client for Windows and its signed virtual host-controller driver, which CTM-USBIP builds on. The installer redistributes its signed setup unmodified under the BSD-2-Clause license (`usbip-win2-LICENSE.txt` is installed alongside the app).
 
 [usbip-win2]: https://github.com/vadimgrn/usbip-win2
